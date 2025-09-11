@@ -2,7 +2,7 @@ import onnxruntime as ort
 from transformers import AutoTokenizer
 import numpy as np
 
-MODEL_DIR = "C:/PERSONAL/Learning/Gateway/api-onnx/onnx-gpt2"
+MODEL_DIR = "C:/PERSONAL/Learning/Gateway/api-onnx/onnx-gpt2-kv"
 MODEL_FILE = f"{MODEL_DIR}/model.onnx"
 
 class ONNXService:
@@ -15,8 +15,6 @@ class ONNXService:
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
         self.session = ort.InferenceSession(MODEL_FILE, providers=["CPUExecutionProvider"])
 
-        print([i.name for i in self.session.get_inputs()])
-
     def tokenize_prompt(self, prompt):
         inputs = self.tokenizer(prompt, return_tensors="np")
         input_ids = inputs["input_ids"].astype(np.int64)
@@ -24,21 +22,37 @@ class ONNXService:
 
         return input_ids, attention_mask, input_ids.shape[1]
     
-    def create_inputs(self, input_ids, attention_mask):
+    def create_inputs(self, input_ids, attention_mask, past_key_values=None):
         input_dict = {"input_ids": input_ids}
         input_names = [i.name for i in self.session.get_inputs()]
-        
+
         if "position_ids" in input_names:
-            seq_len = input_ids.shape[1]
-            input_dict["position_ids"] = np.arange(seq_len, dtype=np.int64)[None, :]
-        
+            position_ids = np.array([[attention_mask.shape[1] - 1]], dtype=np.int64)
+
+            if past_key_values is None:
+                position_ids = np.arange(attention_mask.shape[1], dtype=np.int64)[None, :]
+            
+            input_dict["position_ids"] = position_ids
+
+
         if "attention_mask" in input_names:
             input_dict["attention_mask"] = attention_mask
+
+        if any("past_key_values" in name for name in input_names):
+            if past_key_values is None:
+                num_layers = (len(self.session.get_outputs()) - 1) // 2
+                for i in range(num_layers):
+                    input_dict[f"past_key_values.{i}.key"] = np.zeros((1, 12, 0, 64), dtype=np.float32)
+                    input_dict[f"past_key_values.{i}.value"] = np.zeros((1, 12, 0, 64), dtype=np.float32)
+            else:
+                for i, past in enumerate(past_key_values):
+                    input_dict[f"past_key_values.{i}.key"] = past[0]
+                    input_dict[f"past_key_values.{i}.value"] = past[1]
         
         return input_dict
 
     def sample_next_token(self, logits, temperature, top_k):
-        logits = logits[0, -1] 
+        logits = logits[0, -1]
 
         if temperature <= 0:
             return int(np.argmax(logits))
@@ -64,21 +78,38 @@ class ONNXService:
             raise ValueError("Prompt too long for GPT-2 model")
         
         generated_tokens = 0
+        past_key_values = None
+        
+        for _ in range(min(max_new_tokens - 1, max_context - prompt_tokens - 1)):
+            if past_key_values is None:
+                onnx_inputs = self.create_inputs(input_ids, attention_mask, past_key_values)
+            else:
+                onnx_inputs = self.create_inputs(input_ids[:, -1:], attention_mask, past_key_values)
 
-        for _ in range(min(max_new_tokens, max_context - prompt_tokens)):
-                onnx_inputs = self.create_inputs(input_ids, attention_mask)
-                
-                outputs = self.session.run(None, onnx_inputs)
-                logits = outputs[0]
-                
-                next_token = self.sample_next_token(logits, temperature, top_k)
-                
-                input_ids = np.concatenate([input_ids, np.array([[next_token]], dtype=np.int64)], axis=1)
-                attention_mask = np.concatenate([attention_mask, np.array([[1]], dtype=np.int64)], axis=1)
-                generated_tokens += 1
+            outputs = self.session.run(None, onnx_inputs)
+            
+            logits = outputs[0]
+            num_layers = len(self.session.get_outputs()) - 1
+            past_key_values = [
+                (
+                    outputs[i * 2 + 1],
+                    outputs[i * 2 + 2]
+                )
+                for i in range(num_layers // 2)
+            ]
 
+            next_token = self.sample_next_token(logits, temperature, top_k)
+            
+            if next_token == self.tokenizer.eos_token_id:
+                break
+
+            input_ids = np.concatenate([input_ids, np.array([[next_token]], dtype=np.int64)], axis=1)
+            attention_mask = np.concatenate([attention_mask, np.array([[1]], dtype=np.int64)], axis=1)
+
+            generated_tokens += 1
+            
         generated_text = self.tokenizer.decode(input_ids[0], skip_special_tokens=True)
-    
+
         return {
             "content": generated_text,
             "prompt_tokens": prompt_tokens,
