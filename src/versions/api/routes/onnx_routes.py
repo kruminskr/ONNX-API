@@ -12,7 +12,11 @@ router = APIRouter()
 @router.post("/gpt2", response_model=ONNXResponse)
 async def process_gpt2_onnx(request: ONNXRequest, onnx_service: ONNXService = Depends(get_onnx_service)):
     try:
-        response = await onnx_service.get_gpt2_onnx(request.query)
+        # prompt = request.messages[0]['content']
+
+        prompt = request.query
+
+        response = onnx_service.generate(prompt, 200, 0.7, 40)
 
         return response
     except Exception as e:
