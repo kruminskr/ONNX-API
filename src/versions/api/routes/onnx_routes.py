@@ -1,5 +1,3 @@
-import traceback
-
 from fastapi import APIRouter, Depends, HTTPException
 
 from ....core.dependencies import get_onnx_service
@@ -19,9 +17,6 @@ async def process_gpt2_onnx(request: ONNXRequest, onnx_service: ONNXService = De
         response = onnx_service.generate(prompt, 100, 0.6, 30)
 
         return response
-    except Exception as e:
-        traceback_str = traceback.format_exc()
-        print(f"An error occurred: {e}")
-        print(traceback_str)      
-
+    except Exception as e: 
+        print(e)
         raise HTTPException(status_code=500, detail="Error occurred while fetching data")
