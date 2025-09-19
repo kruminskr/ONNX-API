@@ -1,0 +1,11 @@
+.venv
+.git
+.gitignore
+.env.example
+activate.txt
+Activate.txt  
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+*.swp
