@@ -2,7 +2,7 @@ import onnxruntime as ort
 from transformers import AutoTokenizer
 import numpy as np
 
-MODEL_DIR = "C:/PERSONAL/Learning/Gateway/api-onnx/onnx-gpt2-kv"
+MODEL_DIR = "onnx"
 MODEL_FILE = f"{MODEL_DIR}/model.onnx"
 
 class ONNXService:

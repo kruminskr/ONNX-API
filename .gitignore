@@ -7,6 +7,5 @@ dependecies.txt
 
 .env
 
-onnx-gpt2
-onnx-gpt2-kv
+onnx
 
